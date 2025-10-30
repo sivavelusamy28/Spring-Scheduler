@@ -1,93 +1,43 @@
-package com.example.batchapp.config;
+package com.example.batchapp.batch.reader;
 
-import com.example.batchapp.model.processTracker;
+import com.example.batchapp.model.processTrackerDTO;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.batch.core.Job;
-import org.springframework.batch.core.Step;
-import org.springframework.batch.core.job.builder.JobBuilder;
-import org.springframework.batch.core.launch.support.RunIdIncrementer;
-import org.springframework.batch.core.repository.JobRepository;
-import org.springframework.batch.core.step.builder.StepBuilder;
-import org.springframework.batch.item.ItemProcessor;
-import org.springframework.batch.item.ItemReader;
-import org.springframework.batch.item.ItemWriter;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
-import org.springframework.core.task.TaskExecutor;
-import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
-import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.jdbc.core.RowMapper;
+import org.springframework.stereotype.Component;
 
-@Configuration
-public class BatchJobConfig {
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Timestamp;
+import java.time.LocalDateTime;
+
+@Component
+public class processTrackerRowMapper implements RowMapper<processTrackerDTO> {
     
-    private static final Logger logger = LoggerFactory.getLogger(BatchJobConfig.class);
+    private static final Logger logger = LoggerFactory.getLogger(processTrackerRowMapper.class);
     
-    @Value("${batch.chunk-size:1000}")
-    private int chunkSize;
-    
-    @Value("${batch.thread-pool-size:5}")
-    private int threadPoolSize;
-    
-    /**
-     * Define the main batch job
-     * A Job is a container for Steps
-     */
-    @Bean
-    public Job processJob(JobRepository jobRepository,
-                                 Step processStep) {
+    @Override
+    public processTrackerDTO mapRow(ResultSet rs, int rowNum) throws SQLException {
         
-        logger.info("Creating processJob");
+        processTrackerDTO dto = new processTrackerDTO();
         
-        return new JobBuilder("processJob", jobRepository)
-                .incrementer(new RunIdIncrementer())  // Adds unique parameter to each run
-                .start(processStep)  // First step to execute
-                .build();
+        dto.setAccountNbr(rs.getString("account_nbr"));
+        dto.setLastProcessedTransactionTs(toLocalDateTime(rs.getTimestamp("last_processed_transaction_ts")));
+        dto.setProcessTs(toLocalDateTime(rs.getTimestamp("process_ts")));
+        dto.settimestamp1Ts(toLocalDateTime(rs.getTimestamp("timestamp1_ts")));
+        
+        if (rowNum % 1000 == 0) {
+            logger.debug("Read row #{}: {} with timestamp1_ts: {}", 
+                       rowNum, dto.getAccountNbr(), dto.gettimestamp1Ts());
+        }
+        
+        return dto;
     }
     
     /**
-     * Define the step
-     * A Step contains the Reader, Processor, and Writer
+     * Helper method to safely convert Timestamp to LocalDateTime
      */
-    @Bean
-    public Step processStep(JobRepository jobRepository,
-                                   PlatformTransactionManager transactionManager,
-                                   ItemReader<processTracker> processTrackerReader,
-                                   ItemProcessor<processTracker, processTracker> processProcessor,
-                                   ItemWriter<processTracker> processWriter,
-                                   TaskExecutor batchTaskExecutor) {
-        
-        logger.info("Creating processStep with chunk-size: {} and thread-pool-size: {}", 
-                   chunkSize, threadPoolSize);
-        
-        return new StepBuilder("processStep", jobRepository)
-                .<processTracker, processTracker>chunk(chunkSize, transactionManager)
-                .reader(processTrackerReader)
-                .processor(processProcessor)
-                .writer(processWriter)
-                .taskExecutor(batchTaskExecutor)
-                .throttleLimit(threadPoolSize)  // Max number of concurrent threads
-                .build();
-    }
-    
-    /**
-     * Task executor for parallel processing
-     * Manages thread pool for concurrent chunk processing
-     */
-    @Bean
-    public TaskExecutor batchTaskExecutor() {
-        logger.info("Creating batch TaskExecutor with pool size: {}", threadPoolSize);
-        
-        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-        executor.setCorePoolSize(threadPoolSize);
-        executor.setMaxPoolSize(threadPoolSize * 2);
-        executor.setQueueCapacity(100);
-        executor.setThreadNamePrefix("batch-thread-");
-        executor.setWaitForTasksToCompleteOnShutdown(true);
-        executor.setAwaitTerminationSeconds(60);
-        executor.initialize();
-        
-        return executor;
+    private LocalDateTime toLocalDateTime(Timestamp timestamp) {
+        return timestamp != null ? timestamp.toLocalDateTime() : null;
     }
 }
